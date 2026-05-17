@@ -208,4 +208,58 @@
 
 ---
 
+---
+
+## 架构设计
+
+### 分层隔离
+
+```
+main.py（编排层，自动发现策略）
+   ├── DataEngine（数据层）
+   │   ├── SQLite 存储 + baostock 同步
+   │   └── get_ohlcv(symbol) → DataFrame
+   │
+   ├── IndicatorCache（共享指标层）★ 2026-05-17 新增
+   │   ├── 一次 SQL 全量加载 5000+ 只股票
+   │   ├── groupby + rolling 批量计算核心指标
+   │   └── 策略层调用 cache.get(symbol) → 预计算 DataFrame
+   │
+   ├── Strategy.run()（策略层）
+   │   ├── BaseStrategy.__init_subclass__ 自动注册
+   │   ├── enabled=False 可禁用策略而不删除文件
+   │   └── 新策略只需建文件 + 继承 BaseStrategy
+   │
+   └── FeishuNotifier（通知层）
+```
+
+### 添加新策略的步骤（2026-05-17 起）
+
+1. 在 `sequoia_x/strategy/` 下创建 `my_strategy.py`
+2. 继承 `BaseStrategy`，设置 `webhook_key`
+3. 实现 `run(self) -> list[str]`
+4. 在 `main.py` 顶部加一行 `import sequoia_x.strategy.my_strategy`
+5. 如需写入策略评审文档
+
+**无需**修改 main.py 的 strategies 列表——新策略自动被注册并运行。
+
+### 核心指标集
+
+IndicatorCache 预计算以下指标（窗口 60 日），策略可直接使用：
+
+| 列名 | 含义 | 依赖策略 |
+|------|------|---------|
+| ma5 | 5 日均线 | MaVolume |
+| ma20 | 20 日均线 | MaVolume, HighTightFlag |
+| ma60 | 60 日均线 | — |
+| vol_ma20 | 20 日均量 | MaVolume, TurtleTrade |
+| turnover_20 | 20 日均成交额 | TurtleTrade |
+| high_20_shifted | 前 20 日最高价（shift 1） | TurtleTrade |
+| high_60 | 60 日最高价 | TurtleTrade |
+| low_60 | 60 日最低价 | TurtleTrade |
+
+策略专属的非常规窗口（如 HighTightFlag 的 40 日窗口）仍通过 `engine.get_ohlcv()` 自行计算。
+
+---
+
 *本文档隶属于 Sequoia-X，随代码一起版本管理。*
